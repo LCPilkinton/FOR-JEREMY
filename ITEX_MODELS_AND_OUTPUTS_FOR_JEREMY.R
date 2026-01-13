@@ -40,7 +40,7 @@ theme_clean <- function(){
 
 #########################################################################      SET UP THE DATA        ##########################################################
 load("~/R_Lisa/ITEX/ITEX_data/MYC_ARCTIC_SP_AN.RData") #75470
-
+load("MYC_ARCTIC_SP_AN.RData")
 
 #lets look just at controls
 MYC_ARCTIC_CTL<-MYC_ARCTIC_ix %>%
@@ -93,11 +93,58 @@ model3_brms <- brm(
   data = MYC_ARCTIC_CTL,
   family = zero_one_inflated_beta(),
   prior = prior(gamma(0.01, 0.01), class = phi),  
-  chains = 4,
+  chains = 3,
   iter = 4000,
   warmup = 1000,
-  control = list(adapt_delta = 0.99),
+ control = list(adapt_delta = 0.99),
   file = "model3_brms_autosave"   # <-- autosaves every few minutes
+)
+
+#### Start of Jeremy's suggestions
+
+# use the middle year as the relative instead of start, so that 
+# each interecept of each subsite is centered around the middle of the survey
+# Same as in Bjorkman 2018
+MYC_ARCTIC_CTL <- MYC_ARCTIC_CTL%>%group_by(SiteSubsitePlot) %>%
+  mutate(
+    YEAR_relative_2 = YEAR - mean(range(YEAR)),        # or use your existing YEAR_relative
+    # scale YEAR_relative globally for numerical stability:
+    YEAR_relative_sc = as.numeric(scale(YEAR_relative))
+  )
+
+
+
+sum(MYC_ARCTIC_CTL$PropCov>= 1)
+# There is only 38 100% in the whole dataset, but they need 
+# there own "one model" which increase the complexity a bunch
+# I suggest turning ones into the biggest non-one cover value
+(new_val <- max(MYC_ARCTIC_CTL$PropCov[MYC_ARCTIC_CTL$PropCov < 1]))
+MYC_ARCTIC_CTL$PropCov <- ifelse(MYC_ARCTIC_CTL$PropCov>= 1,new_val,MYC_ARCTIC_CTL$PropCov)
+sum(MYC_ARCTIC_CTL$PropCov>= 1) # worked like a charm
+
+## I suggest setting more explciit prior, this will also help the model to fit
+my_prior <- set_prior("normal(-2,0.5)",class = "Intercept",dpar = "mu")# Cover Intercept
+my_prior <- c(my_prior,set_prior("normal(-2,1)",class = "Intercept",dpar = "zi")) # absence intercept
+
+my_prior <- c(my_prior,prior(gamma(0.01, 0.02), class = phi))
+my_prior <- c(prior(gamma(0.01, 0.02), class = phi))
+
+model3_brms_JB_plot <- brm( #I use bf() to set up several formula
+  # the cover model
+  bf(PropCov ~ 0 + YEAR_relative_sc * GMYCPFUNC + (1 + YEAR_relative_sc | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC),
+     # the absence presence model
+     zi~ 0 + YEAR_relative_sc * GMYCPFUNC + (1 + YEAR_relative_sc | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC) ),
+  data = MYC_ARCTIC_CTL,
+  family = zero_inflated_beta(),
+  prior = my_prior,  
+  chains = 3,
+  iter = 1250, #in the exploratory phase Less iterations and 3 chains is enough
+  warmup = 250,# again, in exploratory phase less burnin
+  cores = 3, # A core is used per chain, compute three time faster !
+  threads = threading(4), # hom many core per core (confusing I know) to speed up even more, use less core that parallel::detectCores()
+  # control = list(adapt_delta = 0.99), # this increase the computation time like crazy, and often better model specification can fix the issues
+  backend = "cmdstanr", # you can comment this or install cmdstanr, more stable API
+  file = "model3_brms_JB_plot"   # <-- autosaves every few minutes
 )
 
 # Save final object 
@@ -109,7 +156,7 @@ write_rds(model3_brms, "model3_brms.rds")
 
 #we have model saved so can load it here
 fitmod3 <- readRDS("R_Lisa/model3_brms.rds") # we add the {R_Lisa/} for remote desktop
-
+fitmod3 <- model3_brms_JB
 summary(fitmod3) #this looks good so far
 
 plot(fitmod3) # all good
