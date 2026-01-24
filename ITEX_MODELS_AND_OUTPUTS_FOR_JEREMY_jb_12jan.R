@@ -129,6 +129,9 @@ my_prior <- c(my_prior,set_prior("normal(-2,1)",class = "Intercept",dpar = "zi")
 my_prior <- c(my_prior,prior(gamma(0.01, 0.02), class = phi))
 my_prior <- c(prior(gamma(0.01, 0.02), class = phi))
 
+#load the model 
+model3_brms_JB_plot <- readRDS("model3_brms_JB_plotid.rds")
+## fit the model 
 model3_brms_JB_plot <- brm( #I use bf() to set up several formula
   # the cover model
   bf(PropCov ~ 0 + YEAR_relative_2 * GMYCPFUNC + (1 + YEAR_relative_2 | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC),
