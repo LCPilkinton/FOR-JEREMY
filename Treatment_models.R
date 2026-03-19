@@ -73,22 +73,22 @@ MYC_ARCTIC_TREAT <- MYC_ARCTIC_TREAT %>%
 MYC_ARCTIC_TREAT <- MYC_ARCTIC_TREAT %>%
   filter(duration >= 5)
 
-#keep only the final year #3978 ( we will keep all years for the interaction model...so hash this out)
-#MYC_ARCTIC_TREAT<- MYC_ARCTIC_TREAT %>%
- # group_by(SiteSubsite) %>%
- # filter(YEAR == max(YEAR, na.rm = TRUE)) %>%
- # ungroup()
+#keep only the final year #3978 ( we will keep all years for the interaction model...so hash this out on teh other models)
+MYC_ARCTIC_TREAT<- MYC_ARCTIC_TREAT %>%
+ group_by(SiteSubsite) %>%
+  filter(YEAR == max(YEAR, na.rm = TRUE)) %>%
+  ungroup()
 
 #add adjusted year relative for interaction model
 # use the middle year as the relative instead of start, so that 
 # each interecept of each subsite is centered around the middle of the survey
 # Same as in Bjorkman 2018
-MYC_ARCTIC_TREAT <- MYC_ARCTIC_TREAT%>%group_by(SiteSubsitePlot) %>%
-  mutate(
-    YEAR_relative_2 = YEAR - mean(range(YEAR)),        # or use your existing YEAR_relative
+#MYC_ARCTIC_TREAT <- MYC_ARCTIC_TREAT%>%group_by(SiteSubsitePlot) %>%
+ # mutate(
+ #   YEAR_relative_2 = YEAR - mean(range(YEAR)),        # or use your existing YEAR_relative
     # scale YEAR_relative globally for numerical stability:
-    YEAR_relative_sc = as.numeric(scale(YEAR_relative_2)) #Lisa editetd to YEAR_relative_2, rather than YEAR_relative
-  )
+  #  YEAR_relative_sc = as.numeric(scale(YEAR_relative_2)) #Lisa editetd to YEAR_relative_2, rather than YEAR_relative
+ # )
 
 
 #create propertion
@@ -97,16 +97,6 @@ MYC_ARCTIC_TREAT<-mutate(MYC_ARCTIC_TREAT,PropCov=Cover/100)#make a proportion
 MYC_ARCTIC_TREAT$GMYCPFUNC <- as.factor(MYC_ARCTIC_TREAT$GMYCPFUNC)
 MYC_ARCTIC_TREAT$MOISTURE <- as.factor(MYC_ARCTIC_TREAT$MOISTURE)
 
-
-#### Checking the proportional values
-
-sum(MYC_ARCTIC_TREAT$PropCov>= 1)
-# There is only 11 100% in the whole dataset, but they need 
-# there own "one model" which increase the complexity a bunch
-# I suggest turning ones into the biggest non-one cover value
-(new_val <- max(MYC_ARCTIC_TREAT$PropCov[MYC_ARCTIC_TREAT$PropCov < 1]))
-MYC_ARCTIC_TREAT$PropCov <- ifelse(MYC_ARCTIC_TREAT$PropCov>= 1,new_val,MYC_ARCTIC_TREAT$PropCov)
-sum(MYC_ARCTIC_TREAT$PropCov>= 1) # worked like a charm
 
 
 ## I suggest setting more explciit prior, this will also help the model to fit
@@ -139,22 +129,121 @@ my_prior <- c(prior(gamma(0.01, 0.02), class = phi))
 
 #now run with all years and interaction with year
 
-TREAT_MODEL_2 <- brm(
- bf(PropCov ~ 0 + TreatmentGroup * YEAR_relative_2 * GMYCPFUNC + (1 + TreatmentGroup | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC)+ (1 + TreatmentGroup|SPECIES_NAME:GMYCPFUNC),
+#TREAT_MODEL_2 <- brm(
+# bf(PropCov ~ 0 + TreatmentGroup * YEAR_relative_2 * GMYCPFUNC + (1 + TreatmentGroup | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC)+ (1 + TreatmentGroup|SPECIES_NAME:GMYCPFUNC),
 #the absence presence model
-   zi~ 0 + TreatmentGroup * GMYCPFUNC + (1 + TreatmentGroup | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC)+ (1 + TreatmentGroup |SPECIES_NAME:GMYCPFUNC) ),
- data = MYC_ARCTIC_TREAT,
+#   zi~ 0 + TreatmentGroup * YEAR_relative_2 * GMYCPFUNC + (1 + TreatmentGroup | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC)+ (1 + TreatmentGroup |SPECIES_NAME:GMYCPFUNC) ),
+# data = MYC_ARCTIC_TREAT,
+#  family = zero_inflated_beta(),
+#  prior = my_prior,  
+#  chains = 3,
+#  iter = 1250, #in the exploratory phase Less iterations and 3 chains is enough
+#  warmup = 250,# again, in exploratory phase less burnin
+#  cores = 3, # A core is used per chain, compute three time faster !
+# threads = threading(4), # hom many core per core (confusing I know) to speed up even more, use less core that parallel::detectCores()
+# control = list(adapt_delta = 0.99), # this increase the computation time like crazy, and often better model specification can fix the issues
+#  backend = "cmdstanr", # you can comment this or install cmdstanr, more stable API <- wouldn't install on my R
+# file = "TREAT_MODEL_2"   # <-- autosaves every few minutes
+#)
+
+#TREAT_MODEL_7 and 8
+
+#remove the group EcMAM:SEVER #25262
+MYC_ARCTIC_TREAT<-MYC_ARCTIC_TREAT %>% filter(GMYCPFUNC !="EcMAM:SEVER") #13688
+unique(MYC_ARCTIC_Test$SiteSubsite)
+
+#remove for treat_6 without am:SDECI
+MYC_ARCTIC_TREAT<-MYC_ARCTIC_TREAT %>% filter(GMYCPFUNC !="AM:SDECI") #13688
+unique(MYC_ARCTIC_Test$SiteSubsite)
+
+#sum the relative plot cover
+
+MYC_ARCTIC_TREAT_S <- MYC_ARCTIC_TREAT %>%
+  group_by(SiteSubsitePlotYear, GMYCPFUNC) %>%
+  summarise(
+    SPropCov = sum(PropCov),
+    across(-c(SPECIES_NAME, PropCov), first),
+    .groups = "drop"
+  )
+
+#### Checking the proportional values
+
+#sum(MYC_ARCTIC_TREAT_S$SPropCov>= 1)
+# Thereare 36 in the whole dataset, but they need 
+# there own "one model" which increase the complexity a bunch
+# I suggest turning ones into the biggest non-one cover value
+#(new_val <- max(MYC_ARCTIC_TREAT_S$SPropCov[MYC_ARCTIC_TREAT_S$SPropCov < 1]))
+#MYC_ARCTIC_TREAT_S$SPropCov <- ifelse(MYC_ARCTIC_TREAT_S$SPropCov>= 1,new_val,MYC_ARCTIC_TREAT_S$SPropCov)
+#sum(MYC_ARCTIC_TREAT_S$SPropCov>= 1) # 0 now
+
+sum(MYC_ARCTIC_TREAT$PropCov>= 1)
+# There is only 11 100% in the whole dataset, but they need 
+# there own "one model" which increase the complexity a bunch
+# I suggest turning ones into the biggest non-one cover value
+(new_val <- max(MYC_ARCTIC_TREAT$PropCov[MYC_ARCTIC_TREAT$PropCov < 1]))
+MYC_ARCTIC_TREAT$PropCov <- ifelse(MYC_ARCTIC_TREAT$PropCov>= 1,new_val,MYC_ARCTIC_TREAT$PropCov)
+sum(MYC_ARCTIC_TREAT$PropCov>= 1) # worked like a charm
+
+
+
+
+#hash this out, but use again if we try the removal of EcMAMSEVER - Juniper
+TREAT_MODEL_9 <- brm( #I use bf() to set up several formula
+  # the cover model
+  bf(PropCov ~ 0 + TreatmentGroup * GMYCPFUNC + (1 | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC)+ (1 |SPECIES_NAME:GMYCPFUNC) +(1 | SiteSubsite:SPECIES_NAME) + (1|SiteSubsitePlot:SPECIES_NAME),
+     # the absence presence model
+     zi~ 0 + TreatmentGroup * GMYCPFUNC + (1 | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC)+ (1 |SPECIES_NAME:GMYCPFUNC) +(1 | SiteSubsite:SPECIES_NAME) + (1|SiteSubsitePlot:SPECIES_NAME) ),
+  data = MYC_ARCTIC_TREAT,
   family = zero_inflated_beta(),
   prior = my_prior,  
   chains = 3,
   iter = 1250, #in the exploratory phase Less iterations and 3 chains is enough
   warmup = 250,# again, in exploratory phase less burnin
   cores = 3, # A core is used per chain, compute three time faster !
- threads = threading(4), # hom many core per core (confusing I know) to speed up even more, use less core that parallel::detectCores()
- control = list(adapt_delta = 0.99), # this increase the computation time like crazy, and often better model specification can fix the issues
-#  backend = "cmdstanr", # you can comment this or install cmdstanr, more stable API <- wouldn't install on my R
- file = "TREAT_MODEL_2"   # <-- autosaves every few minutes
+  threads = threading(4), # hom many core per core (confusing I know) to speed up even more, use less core that parallel::detectCores()
+  # control = list(adapt_delta = 0.99), # this increase the computation time like crazy, and often better model specification can fix the issues
+  #  backend = "cmdstanr", # you can comment this or install cmdstanr, more stable API <- wouldn't install on my R
+  file = "TREAT_MODEL_9"   # <-- autosaves every few minutes
 )
 
 
+
+
+
+ 
+#we removed 2 low gmycpfunc groups and we summed the species plot cover, removing species random effect
+
+#TREAT_MODEL_7 <- brm(
+#  bf(SPropCov ~ 0 + TreatmentGroup * YEAR_relative_2 * GMYCPFUNC + (1 + YEAR_relative_2| SiteSubsite) + (1 +YEAR_relative_2|SiteSubsite:GMYCPFUNC)+ (1 +YEAR_relative_2|SiteSubsitePlot:GMYCPFUNC)
+#     + (1 +YEAR_relative_2|GMYCPFUNC),
+#     #the absence presence model
+#     zi~ 0 + TreatmentGroup * YEAR_relative_2 * GMYCPFUNC + (1 + YEAR_relative_2| SiteSubsite) + (1 +YEAR_relative_2|SiteSubsite:GMYCPFUNC)+ (1 +YEAR_relative_2|SiteSubsitePlot:GMYCPFUNC)
+#     + (1 +YEAR_relative_2|GMYCPFUNC)),
+#  data = MYC_ARCTIC_TREAT_S,
+#  family = zero_inflated_beta(),
+#  prior = my_prior,  
+#  chains = 3,
+#  iter = 1250, 
+#  warmup = 250,
+#  cores = 3, 
+#  threads = threading(4), 
+#  file = "TREAT_MODEL_7" 
+#)
+
+#hash this out, but use again if we try the removal of EcMAMSEVER - Juniper
+#TREAT_MODEL_8 <- brm( #I use bf() to set up several formula
+  # the cover model
+ ## bf(SPropCov ~ 0 + TreatmentGroup * GMYCPFUNC + (1 | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC),
+     # the absence presence model
+ #    zi~ 0 + TreatmentGroup * GMYCPFUNC + (1 | SiteSubsite:GMYCPFUNC) + (1|SiteSubsitePlot:GMYCPFUNC)),
+#  data = MYC_ARCTIC_TREAT_S,
+ # family = zero_inflated_beta(),
+#  prior = my_prior,  
+ # chains = 3,
+#  iter = 1250, 
+#  warmup = 250,
+#  cores = 3, 
+#  threads = threading(4), 
+#  file = "TREAT_MODEL_8"  
+#)
 
